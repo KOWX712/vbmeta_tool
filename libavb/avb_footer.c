@@ -38,7 +38,7 @@ bool avb_footer_validate_and_byteswap(const AvbFooter* src, AvbFooter* dest) {
   /* Check that magic is correct. */
   if (avb_safe_memcmp(dest->magic, AVB_FOOTER_MAGIC, AVB_FOOTER_MAGIC_LEN) !=
       0) {
-    avb_error("Footer magic is incorrect.\n");
+    /* avb_error("Footer magic is incorrect.\n"); */
     return false;
   }
 

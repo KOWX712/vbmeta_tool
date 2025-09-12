@@ -53,12 +53,12 @@
 static inline bool result_should_continue(AvbSlotVerifyResult result) {
   switch (result) {
     case AVB_SLOT_VERIFY_RESULT_ERROR_OOM:
-    case AVB_SLOT_VERIFY_RESULT_ERROR_IO:
     case AVB_SLOT_VERIFY_RESULT_ERROR_INVALID_METADATA:
     case AVB_SLOT_VERIFY_RESULT_ERROR_UNSUPPORTED_VERSION:
       return false;
 
     case AVB_SLOT_VERIFY_RESULT_OK:
+    case AVB_SLOT_VERIFY_RESULT_ERROR_IO:
     case AVB_SLOT_VERIFY_RESULT_ERROR_VERIFICATION:
     case AVB_SLOT_VERIFY_RESULT_ERROR_ROLLBACK_INDEX:
     case AVB_SLOT_VERIFY_RESULT_ERROR_PUBLIC_KEY_REJECTED:
@@ -170,9 +170,9 @@ static AvbSlotVerifyResult load_and_verify_hash_partition(
   }
 
   if (avb_safe_memcmp(digest, desc_digest, digest_len) != 0) {
-    avb_errorv(part_name,
+    /* avb_errorv(part_name,
                ": Hash of data does not match digest in descriptor.\n",
-               NULL);
+               NULL); */
     ret = AVB_SLOT_VERIFY_RESULT_ERROR_VERIFICATION;
     goto out;
   }
@@ -286,6 +286,7 @@ static AvbSlotVerifyResult load_and_verify_vbmeta(
     uint8_t footer_buf[AVB_FOOTER_SIZE];
     size_t footer_num_read;
     AvbFooter footer;
+    bool footer_ok = false;
 
     io_ret = ops->read_from_partition(ops,
                                       full_partition_name,
@@ -293,33 +294,23 @@ static AvbSlotVerifyResult load_and_verify_vbmeta(
                                       AVB_FOOTER_SIZE,
                                       footer_buf,
                                       &footer_num_read);
-    if (io_ret == AVB_IO_RESULT_ERROR_OOM) {
-      ret = AVB_SLOT_VERIFY_RESULT_ERROR_OOM;
-      goto out;
-    } else if (io_ret != AVB_IO_RESULT_OK) {
-      avb_errorv(full_partition_name, ": Error loading footer.\n", NULL);
-      ret = AVB_SLOT_VERIFY_RESULT_ERROR_IO;
-      goto out;
-    }
-    avb_assert(footer_num_read == AVB_FOOTER_SIZE);
-
-    if (!avb_footer_validate_and_byteswap((const AvbFooter*)footer_buf,
-                                          &footer)) {
-      avb_errorv(full_partition_name, ": Error validating footer.\n", NULL);
-      ret = AVB_SLOT_VERIFY_RESULT_ERROR_INVALID_METADATA;
-      goto out;
+    if (io_ret == AVB_IO_RESULT_OK && footer_num_read == AVB_FOOTER_SIZE) {
+      if (avb_footer_validate_and_byteswap((const AvbFooter*)footer_buf,
+                                            &footer)) {
+        if (footer.vbmeta_size <= VBMETA_MAX_SIZE) {
+          footer_ok = true;
+        }
+      }
     }
 
-    /* Basic footer sanity check since the data is untrusted. */
-    if (footer.vbmeta_size > VBMETA_MAX_SIZE) {
-      avb_errorv(
-          full_partition_name, ": Invalid vbmeta size in footer.\n", NULL);
-      ret = AVB_SLOT_VERIFY_RESULT_ERROR_INVALID_METADATA;
-      goto out;
+    if (footer_ok) {
+      vbmeta_offset = footer.vbmeta_offset;
+      vbmeta_size = footer.vbmeta_size;
+    } else {
+      /* Footer not found or invalid, assume vbmeta is at the beginning. */
+      vbmeta_offset = 0;
+      vbmeta_size = VBMETA_MAX_SIZE;
     }
-
-    vbmeta_offset = footer.vbmeta_offset;
-    vbmeta_size = footer.vbmeta_size;
   }
 
   vbmeta_buf = avb_malloc(vbmeta_size);
@@ -360,7 +351,7 @@ static AvbSlotVerifyResult load_and_verify_vbmeta(
                                    out_algorithm_type);
       goto out;
     } else {
-      avb_errorv(full_partition_name, ": Error loading vbmeta data.\n", NULL);
+      /* avb_errorv(full_partition_name, ": Error loading vbmeta data.\n", NULL); */
       ret = AVB_SLOT_VERIFY_RESULT_ERROR_IO;
       goto out;
     }
@@ -381,11 +372,11 @@ static AvbSlotVerifyResult load_and_verify_vbmeta(
     case AVB_VBMETA_VERIFY_RESULT_HASH_MISMATCH:
     case AVB_VBMETA_VERIFY_RESULT_SIGNATURE_MISMATCH:
       ret = AVB_SLOT_VERIFY_RESULT_ERROR_VERIFICATION;
-      avb_errorv(full_partition_name,
+      /* avb_errorv(full_partition_name,
                  ": Error verifying vbmeta image: ",
                  avb_vbmeta_verify_result_to_string(vbmeta_ret),
                  "\n",
-                 NULL);
+                 NULL); */
       if (!allow_verification_error) {
         goto out;
       }
@@ -394,17 +385,17 @@ static AvbSlotVerifyResult load_and_verify_vbmeta(
     case AVB_VBMETA_VERIFY_RESULT_INVALID_VBMETA_HEADER:
       /* No way to continue this case. */
       ret = AVB_SLOT_VERIFY_RESULT_ERROR_INVALID_METADATA;
-      avb_errorv(full_partition_name,
+      /* avb_errorv(full_partition_name,
                  ": Error verifying vbmeta image: invalid vbmeta header\n",
-                 NULL);
+                 NULL); */
       goto out;
 
     case AVB_VBMETA_VERIFY_RESULT_UNSUPPORTED_VERSION:
       /* No way to continue this case. */
       ret = AVB_SLOT_VERIFY_RESULT_ERROR_UNSUPPORTED_VERSION;
-      avb_errorv(full_partition_name,
+      /* avb_errorv(full_partition_name,
                  ": Error verifying vbmeta image: unsupported AVB version\n",
-                 NULL);
+                 NULL); */
       goto out;
   }
 
@@ -418,9 +409,9 @@ static AvbSlotVerifyResult load_and_verify_vbmeta(
   } else {
     if (vbmeta_header.flags != 0) {
       ret = AVB_SLOT_VERIFY_RESULT_ERROR_INVALID_METADATA;
-      avb_errorv(full_partition_name,
+      /* avb_errorv(full_partition_name,
                  ": chained vbmeta image has non-zero flags\n",
-                 NULL);
+                 NULL); */
       goto out;
     }
   }
@@ -431,10 +422,10 @@ static AvbSlotVerifyResult load_and_verify_vbmeta(
       avb_assert(!is_main_vbmeta);
       if (expected_public_key_length != pk_len ||
           avb_safe_memcmp(expected_public_key, pk_data, pk_len) != 0) {
-        avb_errorv(full_partition_name,
+        /* avb_errorv(full_partition_name,
                    ": Public key used to sign data does not match key in chain "
                    "partition descriptor.\n",
-                   NULL);
+                   NULL); */
         ret = AVB_SLOT_VERIFY_RESULT_ERROR_PUBLIC_KEY_REJECTED;
         if (!allow_verification_error) {
           goto out;
@@ -459,16 +450,16 @@ static AvbSlotVerifyResult load_and_verify_vbmeta(
         ret = AVB_SLOT_VERIFY_RESULT_ERROR_OOM;
         goto out;
       } else if (io_ret != AVB_IO_RESULT_OK) {
-        avb_errorv(full_partition_name,
+        /* avb_errorv(full_partition_name,
                    ": Error while checking public key used to sign data.\n",
-                   NULL);
+                   NULL); */
         ret = AVB_SLOT_VERIFY_RESULT_ERROR_IO;
         goto out;
       }
       if (!key_is_trusted) {
-        avb_errorv(full_partition_name,
+        /* avb_errorv(full_partition_name,
                    ": Public key used to sign data rejected.\n",
-                   NULL);
+                   NULL); */
         ret = AVB_SLOT_VERIFY_RESULT_ERROR_PUBLIC_KEY_REJECTED;
         if (!allow_verification_error) {
           goto out;

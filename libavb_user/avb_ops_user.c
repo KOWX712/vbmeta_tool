@@ -34,77 +34,46 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <cutils/properties.h>
-#include <fs_mgr.h>
+#include <sys/system_properties.h>
 
 #include <libavb_ab/libavb_ab.h>
 
-/* Open the appropriate fstab file and fallback to /fstab.device if
- * that's what's being used.
- */
-static struct fstab* open_fstab(void) {
-  struct fstab* fstab = fs_mgr_read_fstab_default();
-
-  if (fstab != NULL) {
-    return fstab;
-  }
-
-  fstab = fs_mgr_read_fstab("/fstab.device");
-  return fstab;
-}
-
 static int open_partition(const char* name, int flags) {
-  char* path;
+  char path[256];
   int fd;
-  struct fstab* fstab;
-  struct fstab_rec* record;
+  char slot_suffix[PROP_VALUE_MAX] = {0};
+  char full_name[256] = {0};
 
-  /* We can't use fs_mgr to look up |name| because fstab doesn't list
-   * every slot partition (it uses the slotselect option to mask the
-   * suffix) and |slot| is expected to be of that form, e.g. boot_a.
-   *
-   * We can however assume that there's an entry for the /misc mount
-   * point and use that to get the device file for the misc
-   * partition. From there we'll assume that a by-name scheme is used
-   * so we can just replace the trailing "misc" by the given |name|,
-   * e.g.
-   *
-   *   /dev/block/platform/soc.0/7824900.sdhci/by-name/misc ->
-   *   /dev/block/platform/soc.0/7824900.sdhci/by-name/boot_a
-   *
-   * If needed, it's possible to relax this assumption in the future
-   * by trawling /sys/block looking for the appropriate sibling of
-   * misc and then finding an entry in /dev matching the sysfs entry.
-   */
+  /* Get slot suffix (returns "_a", "_b", or empty string) */
+  if (__system_property_get("ro.boot.slot_suffix", slot_suffix) == 0) {
+    /* If property is not set, default to empty string. */
+    slot_suffix[0] = '\0';
+  }
 
-  fstab = open_fstab();
-  if (fstab == NULL) {
-    return -1;
-  }
-  record = fs_mgr_get_entry_for_mount_point(fstab, "/misc");
-  if (record == NULL) {
-    fs_mgr_free_fstab(fstab);
-    return -1;
-  }
+  /* Construct partition name with slot suffix */
   if (strcmp(name, "misc") == 0) {
-    path = strdup(record->blk_device);
+    /* misc partition doesn't have slot suffix */
+    snprintf(full_name, sizeof(full_name), "%s", name);
   } else {
-    size_t trimmed_len, name_len;
-    const char* end_slash = strrchr(record->blk_device, '/');
-    if (end_slash == NULL) {
-      fs_mgr_free_fstab(fstab);
-      return -1;
+    size_t name_len = strlen(name);
+    size_t suffix_len = strlen(slot_suffix);
+    if (name_len >= suffix_len &&
+        strcmp(name + name_len - suffix_len, slot_suffix) == 0) {
+      snprintf(full_name, sizeof(full_name), "%s", name);
+    } else {
+      snprintf(full_name, sizeof(full_name), "%s%s", name, slot_suffix);
     }
-    trimmed_len = end_slash - record->blk_device + 1;
-    name_len = strlen(name);
-    path = calloc(trimmed_len + name_len + 1, 1);
-    strncpy(path, record->blk_device, trimmed_len);
-    strncpy(path + trimmed_len, name, name_len);
   }
-  fs_mgr_free_fstab(fstab);
 
+  /* Try standard by-name path */
+  snprintf(path, sizeof(path), "/dev/block/by-name/%s", full_name);
   fd = open(path, flags);
-  free(path);
+
+  if (fd == -1) {
+    /* Fallback: try without by-name directory (direct device) */
+    snprintf(path, sizeof(path), "/dev/block/%s", full_name);
+    fd = open(path, flags);
+  }
 
   return fd;
 }

@@ -120,7 +120,7 @@ extern "C" {
  */
 #define avb_error(message, ...)               \
   do {                                        \
-    AVB_LOG("ERROR", message, ##__VA_ARGS__); \
+    /* AVB_LOG("ERROR", message, ##__VA_ARGS__); */ \
   } while (0)
 
 /* Prints out a message and calls avb_abort().

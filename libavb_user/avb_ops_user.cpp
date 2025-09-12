@@ -34,22 +34,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <cutils/properties.h>
-#include <fs_mgr.h>
-
+#define AVB_AB_I_UNDERSTAND_LIBAVB_AB_IS_DEPRECATED
 #include <libavb_ab/libavb_ab.h>
-
-using android::fs_mgr::Fstab;
-using android::fs_mgr::GetEntryForMountPoint;
-using android::fs_mgr::ReadDefaultFstab;
-using android::fs_mgr::ReadFstabFromFile;
-
-/* Open the appropriate fstab file and fallback to /fstab.device if
- * that's what's being used.
- */
-static bool open_fstab(Fstab* fstab) {
-  return ReadDefaultFstab(fstab) || ReadFstabFromFile("/fstab.device", fstab);
-}
 
 static int open_partition(const char* name, int flags) {
   char* path;
@@ -68,55 +54,13 @@ static int open_partition(const char* name, int flags) {
     }
   }
 
-  /* OK, so /dev/block/by-name/<partition_name> didn't work... so we're
-   * falling back to what we used to do before that:
-   *
-   * We can't use fs_mgr to look up |name| because fstab doesn't list
-   * every slot partition (it uses the slotselect option to mask the
-   * suffix) and |slot| is expected to be of that form, e.g. boot_a.
-   *
-   * We can however assume that there's an entry for the /misc mount
-   * point and use that to get the device file for the misc
-   * partition. From there we'll assume that a by-name scheme is used
-   * so we can just replace the trailing "misc" by the given |name|,
-   * e.g.
-   *
-   *   /dev/block/platform/soc.0/7824900.sdhci/by-name/misc ->
-   *   /dev/block/platform/soc.0/7824900.sdhci/by-name/boot_a
-   *
-   * If needed, it's possible to relax this assumption in the future
-   * by trawling /sys/block looking for the appropriate sibling of
-   * misc and then finding an entry in /dev matching the sysfs entry.
+  /* If /dev/block/by-name/<partition_name> didn't work, we don't support
+   * other methods of opening partitions.
    */
-
-  Fstab fstab;
-  if (!open_fstab(&fstab)) {
-    return -1;
-  }
-  auto record = GetEntryForMountPoint(&fstab, "/misc");
-  if (record == nullptr) {
-    return -1;
-  }
-  if (strcmp(name, "misc") == 0) {
-    path = strdup(record->blk_device.c_str());
-  } else {
-    size_t trimmed_len, name_len;
-    const char* end_slash = strrchr(record->blk_device.c_str(), '/');
-    if (end_slash == NULL) {
-      return -1;
-    }
-    trimmed_len = end_slash - record->blk_device.c_str() + 1;
-    name_len = strlen(name);
-    path = static_cast<char*>(calloc(trimmed_len + name_len + 1, 1));
-    strncpy(path, record->blk_device.c_str(), trimmed_len);
-    strncpy(path + trimmed_len, name, name_len);
-  }
-
-  fd = open(path, flags);
-  free(path);
-
-  return fd;
+  return -1;
 }
+
+
 
 static AvbIOResult read_from_partition(AvbOps* ops,
                                        const char* partition,

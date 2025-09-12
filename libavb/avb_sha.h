@@ -51,7 +51,7 @@ extern "C" {
  * We expect the implementation to provide a header file with the name
  * avb_crypto_ops_impl.h to do all this.
  */
-#include "avb_crypto_ops_impl.h"
+#include "sha/avb_crypto_ops_impl.h"
 
 /* Data structure used for SHA-256. */
 typedef struct {

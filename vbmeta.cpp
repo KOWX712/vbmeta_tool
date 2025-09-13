@@ -10,18 +10,17 @@
 #include "libavb/libavb.h"
 #include "libavb_user/libavb_user.h"
 
-// Helper function to extract digest from command line
-std::string get_vbmeta_digest_from_cmdline(const char* cmdline) {
+// Helper function to extract a specific value from the cmdline
+std::string parse_cmdline(const char* cmdline, const std::string& key_prefix) {
     if (cmdline == nullptr) {
         return "";
     }
     std::string cmdline_str(cmdline);
-    std::string digest_key = "androidboot.vbmeta.digest=";
-    size_t start_pos = cmdline_str.find(digest_key);
+    size_t start_pos = cmdline_str.find(key_prefix);
     if (start_pos == std::string::npos) {
         return "";
     }
-    start_pos += digest_key.length();
+    start_pos += key_prefix.length();
     size_t end_pos = cmdline_str.find(" ", start_pos);
     if (end_pos == std::string::npos) {
         return cmdline_str.substr(start_pos);
@@ -29,7 +28,8 @@ std::string get_vbmeta_digest_from_cmdline(const char* cmdline) {
     return cmdline_str.substr(start_pos, end_pos - start_pos);
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    int ret = 0;
     char buf[PROP_VALUE_MAX];
     std::string slot_suffix;
 
@@ -52,6 +52,16 @@ int main() {
                                                         AVB_SLOT_VERIFY_FLAGS_ALLOW_VERIFICATION_ERROR,
                                                         AVB_HASHTREE_ERROR_MODE_EIO,
                                                         &slot_data);
+
+    if (slot_data == nullptr) {
+        // try with NO_VBMETA_PARTITION flag
+        verify_result = avb_slot_verify(ops,
+                                        requested_partitions,
+                                        slot_suffix.c_str(),
+                                        AVB_SLOT_VERIFY_FLAGS_NO_VBMETA_PARTITION,
+                                        AVB_HASHTREE_ERROR_MODE_EIO,
+                                        &slot_data);
+    }
 
     if (verify_result != AVB_SLOT_VERIFY_RESULT_OK &&
         verify_result != AVB_SLOT_VERIFY_RESULT_ERROR_OOM &&
@@ -76,16 +86,48 @@ int main() {
         return 1;
     }
 
-    std::string digest = get_vbmeta_digest_from_cmdline(slot_data->cmdline);
+    std::string digest = parse_cmdline(slot_data->cmdline, "androidboot.vbmeta.digest=");
+    std::string hash_alg = parse_cmdline(slot_data->cmdline, "androidboot.vbmeta.hash_alg=");
+    std::string size = parse_cmdline(slot_data->cmdline, "androidboot.vbmeta.size=");
 
-    if (digest.empty()) {
-        std::cerr << "Error: Could not find vbmeta digest in cmdline." << std::endl;
+    if (argc == 1) {
+        if (!digest.empty()) {
+            std::cout << "digest:" << digest << std::endl;
+        }
+        if (!hash_alg.empty()) {
+            std::cout << "hash_alg:" << hash_alg << std::endl;
+        }
+        if (!size.empty()) {
+            std::cout << "size:" << size << std::endl;
+        }
+    } else if (argc == 2) {
+        std::string arg = argv[1];
+        if (arg == "digest") {
+            std::cout << digest << std::endl;
+        } else if (arg == "hash_alg") {
+            std::cout << hash_alg << std::endl;
+        } else if (arg == "size") {
+            std::cout << size << std::endl;
+        } else if (arg == "-h" || arg == "--help") {
+            std::cout << "Usage: " << argv[0] << " digest|hash_alg|size" << std::endl;
+        } else {
+            std::cerr << "Error: Unknown argument. Usage: " << argv[0] << " digest|hash_alg|size" << std::endl;
+            ret = 1;
+            goto cleanup;
+        }
     } else {
-        std::cout << "[VBMETA_DIGEST]:" << digest << std::endl;
+        std::cerr << "Error: Too many arguments. Usage: " << argv[0] << " digest|hash_alg|size" << std::endl;
+        ret = 1;
+        goto cleanup;
     }
 
-    avb_slot_verify_data_free(slot_data);
-    avb_ops_user_free(ops);
+cleanup:
+    if (slot_data) {
+        avb_slot_verify_data_free(slot_data);
+    }
+    if (ops) {
+        avb_ops_user_free(ops);
+    }
 
-    return 0;
+    return ret;
 }

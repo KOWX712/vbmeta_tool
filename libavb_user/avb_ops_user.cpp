@@ -54,9 +54,15 @@ static int open_partition(const char* name, int flags) {
     }
   }
 
-  /* If /dev/block/by-name/<partition_name> didn't work, we don't support
-   * other methods of opening partitions.
-   */
+  path = avb_strdupv("/dev/block/bootdevice/by-name/", name, NULL);
+  if (path != NULL) {
+    fd = open(path, flags);
+    avb_free(path);
+    if (fd != -1) {
+      return fd;
+    }
+  }
+
   return -1;
 }
 
